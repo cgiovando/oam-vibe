@@ -4,7 +4,7 @@ A modern, responsive web application for browsing and discovering open aerial im
 
 **Live Demo:** [https://cgiovando.github.io/oam-vibe/](https://cgiovando.github.io/oam-vibe/)
 
-> **Note:** This is an experimental pilot application and does not yet fully replace the official [OAM Browser](https://map.openaerialmap.org/). See [Limitations](#known-limitations) for details.
+> **Note:** This is an experimental pilot application and does not yet fully replace the official [OAM Browser](https://map.openaerialmap.org/). This app was built primarily with AI assistance—see the [AI Disclaimer](#ai-generated-code-disclaimer) for details. See also [Limitations](#known-limitations).
 
 ## Features
 
@@ -147,7 +147,7 @@ This is an **experimental pilot application** and does not yet fully replace the
 - **Missing Features:**
   - Image uploader (available at [upload.openaerialmap.org](https://upload.openaerialmap.org/))
   - User authentication
-  - Image bookmarking/favorites
+  - Image management in user pages
   - Full imagery catalog browsing (currently limited to 50 results)
 
 - **Technical Limitations:**
@@ -157,7 +157,9 @@ This is an **experimental pilot application** and does not yet fully replace the
 
 ## Future Plans
 
-This project aims to eventually align with the [HOT Development Guide](https://docs.hotosm.org/dev-guide/intro/) standards for integration into the broader Humanitarian OpenStreetMap Team ecosystem.
+This project is being developed in alignment with the [OpenAerialMap Roadmap](https://github.com/hotosm/OpenAerialMap?tab=readme-ov-file#roadmap), which outlines the strategic direction for OAM's development.
+
+The project also aims to eventually align with the [HOT Development Guide](https://docs.hotosm.org/dev-guide/intro/) standards for integration into the broader Humanitarian OpenStreetMap Team ecosystem.
 
 ## Contributing
 

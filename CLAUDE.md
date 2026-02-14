@@ -48,7 +48,6 @@ src/
 ├── App.jsx              # Root component, all state, API fetch logic
 ├── main.jsx             # Entry point (imports index.css + App)
 ├── index.css            # Tailwind directives + full-height reset
-├── App.css              # DEAD FILE - Vite boilerplate, never imported
 └── components/
     ├── Map.jsx           # MapLibre map, layers, grid, previews, events (largest file ~484 lines)
     ├── Sidebar.jsx       # Scrollable image list with lazy "Load More"
@@ -56,10 +55,7 @@ src/
     ├── MapFilterBar.jsx  # Dropdown filters on map (platform, date, license)
     ├── Toolbar.jsx       # Left-side map controls (search, basemap switcher, zoom)
     ├── MiniMap.jsx       # Bottom-right overview map with viewport box
-    ├── BurgerMenu.jsx    # Top-right hamburger menu with links
-    ├── SearchBar.jsx     # DEAD FILE - replaced by search in Toolbar.jsx
-    ├── BasemapSwitcher.jsx # DEAD FILE - replaced by switcher in Toolbar.jsx
-    └── FilterPanel.jsx   # DEAD FILE - replaced by MapFilterBar.jsx
+    └── BurgerMenu.jsx    # Top-right hamburger menu with links
 ```
 
 ## Config
@@ -85,7 +81,6 @@ npm run lint     # ESLint
   - Cleaned up ImageCard (removed per-image preview toggle)
 
 ## Known Issues & Tech Debt
-- **Dead files:** `App.css`, `SearchBar.jsx`, `BasemapSwitcher.jsx`, `FilterPanel.jsx` can be deleted
 - **No fetch abort:** Rapid map pans queue concurrent API requests with potential stale data race
 - **Expensive mousemove:** When image selected, hover handler iterates all features with Turf bbox on every mouse move
 - **No meaningful bbox change check:** Every moveend triggers API fetch even for tiny pans

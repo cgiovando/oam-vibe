@@ -3,7 +3,7 @@ import ImageCard from './ImageCard';
 
 const ITEMS_PER_PAGE = 10;
 
-function Sidebar({ features, onSelect, selectedFeature, isLoading, limit, layerMode, previewedIds, hiddenIds, onTogglePreview }) {
+function Sidebar({ features, onSelect, selectedFeature, isLoading, limit }) {
   const [visibleCount, setVisibleCount] = useState(ITEMS_PER_PAGE);
   const listRef = useRef(null);
 
@@ -34,14 +34,6 @@ function Sidebar({ features, onSelect, selectedFeature, isLoading, limit, layerM
 
   const visibleFeatures = features.slice(0, visibleCount);
 
-  const isFeatureVisible = (id) => {
-    if (layerMode === 'previews') {
-      return !hiddenIds.has(id);
-    } else {
-      return previewedIds.has(id);
-    }
-  };
-
   return (
     <div ref={listRef} className="flex-1 overflow-y-auto bg-gray-50 relative scroll-smooth font-sans">
       <div className="p-5 border-b border-gray-200 bg-white sticky top-0 z-20 shadow-sm">
@@ -69,13 +61,11 @@ function Sidebar({ features, onSelect, selectedFeature, isLoading, limit, layerM
         ) : features.length > 0 ? (
           <>
             {visibleFeatures.map((feature) => (
-              <ImageCard 
-                key={feature.properties.id} 
-                feature={feature} 
+              <ImageCard
+                key={feature.properties.id}
+                feature={feature}
                 onSelect={onSelect}
                 isSelected={selectedFeature && selectedFeature.properties.id === feature.properties.id}
-                isPreviewOn={isFeatureVisible(feature.properties.id)}
-                onTogglePreview={() => onTogglePreview(feature.properties.id)}
               />
             ))}
             

@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import bbox from '@turf/bbox';
 
-function ImageCard({ feature, onSelect, isSelected, isPreviewOn, onTogglePreview }) {
+function ImageCard({ feature, onSelect, isSelected }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState(null);
   const cardRef = useRef(null);
@@ -56,12 +56,6 @@ function ImageCard({ feature, onSelect, isSelected, isPreviewOn, onTogglePreview
   const handleDeselect = (e) => { e.stopPropagation(); onSelect(null); };
   const handleCopy = (e, text, feedbackId) => { e.stopPropagation(); navigator.clipboard.writeText(text); setCopyFeedback(feedbackId); setTimeout(() => setCopyFeedback(null), 2000); };
 
-  // NEW: Handle Toggle Click
-  const handleToggleClick = (e) => {
-    e.stopPropagation();
-    onTogglePreview();
-  };
-
   const handleOpenJosm = async (e) => {
     e.stopPropagation();
     const url = getTmsUrl();
@@ -102,25 +96,6 @@ function ImageCard({ feature, onSelect, isSelected, isPreviewOn, onTogglePreview
       <div className="p-4">
         <div className="aspect-video bg-gray-100 rounded-md mb-3 overflow-hidden relative border border-gray-200 shadow-inner">
            {p.thumbnail ? <img src={p.thumbnail} alt="Preview" className="w-full h-full object-cover" loading="lazy" /> : <div className="flex items-center justify-center h-full text-gray-400 text-xs">No Preview</div>}
-           
-           {/* NEW: Overlay Toggle Button on Image */}
-           <button 
-             onClick={handleToggleClick}
-             className={`absolute top-2 left-2 p-1.5 rounded shadow-sm border transition-all z-10 ${isPreviewOn ? 'bg-cyan-500 text-white border-cyan-600 hover:bg-cyan-600' : 'bg-white/90 text-gray-500 border-gray-200 hover:text-cyan-600 hover:bg-white'}`}
-             title={isPreviewOn ? "Hide on map" : "Show on map"}
-           >
-             {isPreviewOn ? (
-               <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                 <path d="M10 12a2 2 0 100-4 2 2 0 000 4z" />
-                 <path fillRule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clipRule="evenodd" />
-               </svg>
-             ) : (
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                </svg>
-             )}
-           </button>
         </div>
 
         <div className="flex justify-between items-start gap-2 pr-6">

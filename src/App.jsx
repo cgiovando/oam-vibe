@@ -25,9 +25,8 @@ function App() {
   const initialUrlSelectionDone = useRef(false);
 
   // --- STATE ---
-  const [layerMode, setLayerMode] = useState('none');
-  const [previewedIds, setPreviewedIds] = useState(new Set());
-  const [hiddenIds, setHiddenIds] = useState(new Set());
+  const [previewsEnabled, setPreviewsEnabled] = useState(true);
+  const [hoveredFeatureId, setHoveredFeatureId] = useState(null);
   const [basemap, setBasemap] = useState('carto');
 
   const [filters, setFilters] = useState({
@@ -44,14 +43,6 @@ function App() {
   const handleSelectFeature = (feature) => {
     setSelectedFeature(feature);
     updateUrlSelection(feature);
-  };
-
-  const handleTogglePreview = (id) => {
-    if (layerMode === 'previews') {
-      setHiddenIds(prev => { const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next; });
-    } else {
-      setPreviewedIds(prev => { const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next; });
-    }
   };
 
   const formatFileSize = (bytes) => {
@@ -171,16 +162,12 @@ function App() {
       
       {/* 1. SIDEBAR (Left) */}
       <div className="flex flex-col w-96 h-full bg-white border-r border-gray-200 shadow-xl z-20 relative">
-        <Sidebar 
-          features={features} 
+        <Sidebar
+          features={features}
           onSelect={handleSelectFeature}
-          selectedFeature={selectedFeature} 
+          selectedFeature={selectedFeature}
           isLoading={loading}
           limit={RESULT_LIMIT}
-          layerMode={layerMode}
-          previewedIds={previewedIds}
-          hiddenIds={hiddenIds}
-          onTogglePreview={handleTogglePreview}
         />
       </div>
 
@@ -211,17 +198,17 @@ function App() {
         />
 
         {/* THE MAP */}
-        <Map 
-          onMapInit={setMapInstance} 
-          features={features} 
+        <Map
+          onMapInit={setMapInstance}
+          features={features}
           selectedFeature={selectedFeature}
           onSelect={handleSelectFeature}
-          searchBbox={mapBbox} 
+          searchBbox={mapBbox}
           onSearchArea={handleMapMoveEnd}
-          layerMode={layerMode}
-          setLayerMode={setLayerMode}
-          previewedIds={previewedIds}
-          hiddenIds={hiddenIds}
+          previewsEnabled={previewsEnabled}
+          setPreviewsEnabled={setPreviewsEnabled}
+          hoveredFeatureId={hoveredFeatureId}
+          onHover={setHoveredFeatureId}
           basemap={basemap}
         />
       </div>

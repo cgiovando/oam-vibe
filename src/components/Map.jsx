@@ -9,24 +9,27 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 // MAPBOX SATELLITE TOKEN (Provided)
 const MB_TOKEN = 'pk.eyJ1Ijoib3BlbmFlcmlhbG1hcCIsImEiOiJjbWowaThzc2swOTVtM2NxMXA2Y2J3bDdzIn0.gmFG84efi2_zK6Yx5ot_5Q';
 
-function Map({ features, selectedFeature, onMapInit, searchBbox, onSearchArea, onSelect, layerMode, setLayerMode, previewedIds, hiddenIds, basemap }) {
+function Map({ features, selectedFeature, onMapInit, searchBbox, onSearchArea, onSelect, previewsEnabled, setPreviewsEnabled, hoveredFeatureId, onHover, basemap }) {
   const mapContainer = useRef(null);
   const map = useRef(null);
   const debounceTimer = useRef(null);
   const gridTimer = useRef(null);
   const isProgrammaticMove = useRef(false);
   const onSearchRef = useRef(onSearchArea);
-  
+
   const onSelectRef = useRef(onSelect);
   const selectedFeatureRef = useRef(selectedFeature);
-  
-  const [isLoaded, setIsLoaded] = useState(false); 
-  const [gridVersion, setGridVersion] = useState(0); 
-  const [zoomMsg, setZoomMsg] = useState('');
+  const onHoverRef = useRef(onHover);
+  const featuresRef = useRef(features);
+
+  const [isLoaded, setIsLoaded] = useState(false);
+  const [gridVersion, setGridVersion] = useState(0);
 
   useEffect(() => { onSelectRef.current = onSelect; }, [onSelect]);
   useEffect(() => { selectedFeatureRef.current = selectedFeature; }, [selectedFeature]);
   useEffect(() => { onSearchRef.current = onSearchArea; }, [onSearchArea]);
+  useEffect(() => { onHoverRef.current = onHover; }, [onHover]);
+  useEffect(() => { featuresRef.current = features; }, [features]);
 
   const { largeFeatures, smallFeatures } = useMemo(() => {
     const large = features.filter(f => f.properties.is_large);
@@ -198,31 +201,88 @@ function Map({ features, selectedFeature, onMapInit, searchBbox, onSearchArea, o
       // Highlight
       map.current.addLayer({ id: 'oam-highlight', type: 'line', source: 'oam-imagery', filter: ['==', 'id', ''], paint: { 'line-color': '#FF0000', 'line-width': 3 } });
 
+      // Hover Highlight (blue)
+      map.current.addLayer({
+        id: 'oam-hover-highlight',
+        type: 'line',
+        source: 'oam-imagery',
+        filter: ['==', 'id', ''],
+        paint: {
+          'line-color': '#2196F3',
+          'line-width': 3,
+          'line-opacity': 0.9
+        }
+      }, 'oam-highlight');
+
       // --- EVENTS ---
-      map.current.on('click', ['oam-large-fill', 'oam-small-fill'], (e) => {
-        if (e.features && e.features.length > 0) {
-          isProgrammaticMove.current = true; 
-          const feature = { type: 'Feature', geometry: e.features[0].geometry, properties: e.features[0].properties };
-          if (onSelectRef.current) onSelectRef.current(feature);
+
+      // Hover handler for faded images
+      map.current.on('mousemove', (e) => {
+        if (!selectedFeatureRef.current) {
+          if (onHoverRef.current) onHoverRef.current(null);
+          map.current.getCanvas().style.cursor = '';
+          return;
         }
+
+        // Check if hovering over any feature bounds
+        const point = [e.lngLat.lng, e.lngLat.lat];
+        let hoveredId = null;
+        const currentFeatures = featuresRef.current;
+
+        for (const f of currentFeatures) {
+          const bounds = bbox(f);
+          if (point[0] >= bounds[0] && point[0] <= bounds[2] &&
+              point[1] >= bounds[1] && point[1] <= bounds[3]) {
+            hoveredId = f.properties.id;
+            break;
+          }
+        }
+
+        if (onHoverRef.current) onHoverRef.current(hoveredId);
+        map.current.getCanvas().style.cursor = hoveredId ? 'pointer' : '';
       });
 
-      map.current.on('click', 'grid-fill', (e) => {
-        if (e.features[0].properties.count > 0) {
-            const bounds = bbox(e.features[0]);
-            map.current.fitBounds(bounds, { padding: 20 });
-        }
-      });
-
+      // Main click handler
       map.current.on('click', (e) => {
-        const hits = map.current.queryRenderedFeatures(e.point, { layers: ['oam-large-fill', 'oam-small-fill', 'grid-fill'] });
-        if (hits.length === 0 && onSelectRef.current) onSelectRef.current(null);
+        // Check footprints first
+        const footprintHits = map.current.queryRenderedFeatures(e.point, {
+          layers: ['oam-large-fill', 'oam-small-fill']
+        });
+
+        if (footprintHits.length > 0) {
+          isProgrammaticMove.current = true;
+          const feature = { type: 'Feature', geometry: footprintHits[0].geometry, properties: footprintHits[0].properties };
+          if (onSelectRef.current) onSelectRef.current(feature);
+          return;
+        }
+
+        // Check grid
+        const gridHits = map.current.queryRenderedFeatures(e.point, { layers: ['grid-fill'] });
+        if (gridHits.length > 0 && gridHits[0].properties.count > 0) {
+          map.current.fitBounds(bbox(gridHits[0]), { padding: 20 });
+          return;
+        }
+
+        // Check if clicking inside any feature bounds (for preview images)
+        const point = [e.lngLat.lng, e.lngLat.lat];
+        const currentFeatures = featuresRef.current;
+        for (const f of currentFeatures) {
+          const bounds = bbox(f);
+          if (point[0] >= bounds[0] && point[0] <= bounds[2] &&
+              point[1] >= bounds[1] && point[1] <= bounds[3]) {
+            if (onSelectRef.current) onSelectRef.current(f);
+            return;
+          }
+        }
+
+        // Click outside - deselect
+        if (onSelectRef.current) onSelectRef.current(null);
       });
 
-      const interactiveLayers = ['oam-large-fill', 'oam-small-fill', 'grid-fill'];
+      const interactiveLayers = ['grid-fill'];
       interactiveLayers.forEach(layer => {
           map.current.on('mouseenter', layer, () => { map.current.getCanvas().style.cursor = 'pointer'; });
-          map.current.on('mouseleave', layer, () => { map.current.getCanvas().style.cursor = ''; });
+          map.current.on('mouseleave', layer, () => { if (!selectedFeatureRef.current) map.current.getCanvas().style.cursor = ''; });
       });
 
       map.current.on('movestart', () => { if (debounceTimer.current) clearTimeout(debounceTimer.current); });
@@ -298,111 +358,127 @@ function Map({ features, selectedFeature, onMapInit, searchBbox, onSearchArea, o
   useEffect(() => {
     if (!map.current || !isLoaded) return;
     const mapInstance = map.current;
-    if (mapInstance.getLayer('selected-thumbnail')) mapInstance.removeLayer('selected-thumbnail');
-    if (mapInstance.getSource('selected-thumbnail-source')) mapInstance.removeSource('selected-thumbnail-source');
-    
-    if (!selectedFeature) {
-      mapInstance.setFilter('oam-highlight', ['==', 'id', '']);
-      return;
+    const selectedId = selectedFeature?.properties?.id;
+
+    // Red highlight filter
+    mapInstance.setFilter('oam-highlight', selectedId ? ['==', 'id', selectedId] : ['==', 'id', '']);
+
+    // Zoom to selected
+    if (selectedFeature && !isProgrammaticMove.current) {
+      try {
+        const bounds = bbox(selectedFeature);
+        mapInstance.fitBounds(bounds, { padding: 50, maxZoom: 18, duration: 1500 });
+      } catch (e) {}
     }
-    
-    const id = selectedFeature.properties.id; 
-    const rawThumbnail = selectedFeature.properties.thumbnail;
-    mapInstance.setFilter('oam-highlight', ['==', 'id', id]);
-    
-    try {
-      const bounds = bbox(selectedFeature);
-      if (!isProgrammaticMove.current) { mapInstance.fitBounds(bounds, { padding: 50, maxZoom: 18, duration: 1500 }); }
-      
-      if (rawThumbnail) {
-        const proxyThumbnail = `https://corsproxy.io/?${encodeURIComponent(rawThumbnail)}`;
-        const coords = [[bounds[0], bounds[3]], [bounds[2], bounds[3]], [bounds[2], bounds[1]], [bounds[0], bounds[1]]];
-        mapInstance.addSource('selected-thumbnail-source', { type: 'image', url: proxyThumbnail, coordinates: coords });
-        mapInstance.addLayer({ id: 'selected-thumbnail', type: 'raster', source: 'selected-thumbnail-source', paint: { 'raster-opacity': 0.9, 'raster-fade-duration': 0 } }, 'oam-highlight'); 
+
+    // Update preview opacities
+    const style = mapInstance.getStyle();
+    style?.layers?.forEach(layer => {
+      if (layer.id.startsWith('preview-')) {
+        const previewId = layer.id.replace('preview-', '');
+        const opacity = selectedId ? (previewId === selectedId ? 1.0 : 0.3) : 0.95;
+        mapInstance.setPaintProperty(layer.id, 'raster-opacity', opacity);
       }
-    } catch(e) {}
+    });
+
+    // Update footprint visibility
+    const fillOpacity = selectedId ? 0 : 0.1;
+    const lineOpacity = selectedId ? 0.15 : 0.8;
+    ['oam-large-fill', 'oam-small-fill'].forEach(id => {
+      if (mapInstance.getLayer(id)) mapInstance.setPaintProperty(id, 'fill-opacity', fillOpacity);
+    });
+    ['oam-large-line', 'oam-small-line'].forEach(id => {
+      if (mapInstance.getLayer(id)) mapInstance.setPaintProperty(id, 'line-opacity', lineOpacity);
+    });
   }, [selectedFeature, isLoaded]);
 
-  // 7. LAYER MODES
+  // 7. PREVIEW MANAGEMENT
   useEffect(() => {
     if (!map.current || !isLoaded) return;
     const mapInstance = map.current;
-    
-    const idsToShow = new Set(); 
-    const isGlobalPreviewOn = layerMode === 'previews';
     const zoom = mapInstance.getZoom();
+    const selectedId = selectedFeature?.properties?.id;
 
-    if (isGlobalPreviewOn) {
-        if (zoom < 8) {
-            setZoomMsg('Zoom in to see images');
-        } else {
-            setZoomMsg('');
-            features.forEach(f => {
-              if (!hiddenIds.has(f.properties.id)) idsToShow.add(f.properties.id);
-            });
+    // Determine which features should have preview layers
+    const visibleIds = new Set();
+
+    // Only add previews if enabled AND zoomed in enough
+    if (previewsEnabled && zoom >= 8) {
+      features.forEach(f => {
+        const isLarge = f.properties.is_large;
+        // Large features at z8+, small features at z10+
+        if ((isLarge && zoom >= 8) || (!isLarge && zoom >= 10)) {
+          visibleIds.add(f.properties.id);
         }
-    } else {
-        setZoomMsg(''); 
+      });
     }
 
-    previewedIds.forEach(id => idsToShow.add(id));
-
+    // Remove stale preview layers
     const style = mapInstance.getStyle();
     if (style && style.layers) {
       style.layers.forEach(layer => {
         if (layer.id.startsWith('preview-')) {
           const id = layer.id.replace('preview-', '');
-          if (!idsToShow.has(id)) {
-             mapInstance.removeLayer(layer.id);
-             if (mapInstance.getSource(layer.id)) mapInstance.removeSource(layer.id);
+          if (!visibleIds.has(id)) {
+            mapInstance.removeLayer(layer.id);
+            if (mapInstance.getSource(layer.id)) mapInstance.removeSource(layer.id);
           }
         }
       });
     }
 
-    idsToShow.forEach(id => {
-       const layerId = `preview-${id}`;
-       if (mapInstance.getLayer(layerId)) return; 
+    // Add new preview layers
+    visibleIds.forEach(id => {
+      const layerId = `preview-${id}`;
+      if (mapInstance.getLayer(layerId)) return;
 
-       const feature = features.find(f => f.properties.id === id);
-       if (feature && feature.properties.thumbnail) {
-           try {
-              const bounds = bbox(feature);
-              const coords = [[bounds[0], bounds[3]], [bounds[2], bounds[3]], [bounds[2], bounds[1]], [bounds[0], bounds[1]]];
-              const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(feature.properties.thumbnail)}`;
-              mapInstance.addSource(layerId, { type: 'image', url: proxyUrl, coordinates: coords });
-              mapInstance.addLayer({ id: layerId, type: 'raster', source: layerId, paint: { 'raster-opacity': 0.9, 'raster-fade-duration': 0 } }, 'oam-highlight'); 
-           } catch(e) { console.error("Error adding layer", id, e); }
-       }
+      const feature = features.find(f => f.properties.id === id);
+      if (!feature?.properties?.thumbnail) return;
+
+      try {
+        const bounds = bbox(feature);
+        const coords = [[bounds[0], bounds[3]], [bounds[2], bounds[3]], [bounds[2], bounds[1]], [bounds[0], bounds[1]]];
+        const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(feature.properties.thumbnail)}`;
+        const opacity = selectedId ? (id === selectedId ? 1.0 : 0.3) : 0.95;
+
+        mapInstance.addSource(layerId, { type: 'image', url: proxyUrl, coordinates: coords });
+        mapInstance.addLayer({
+          id: layerId,
+          type: 'raster',
+          source: layerId,
+          paint: { 'raster-opacity': opacity, 'raster-fade-duration': 0 }
+        }, 'oam-hover-highlight');
+      } catch (e) { console.error("Error adding layer", id, e); }
     });
+  }, [features, isLoaded, selectedFeature, previewsEnabled]);
 
-    if (mapInstance.getLayer('oam-large-fill')) {
-      const footprintFillOpacity = 0.1;
-      mapInstance.setPaintProperty('oam-large-fill', 'fill-opacity', footprintFillOpacity);
-      mapInstance.setPaintProperty('oam-small-fill', 'fill-opacity', footprintFillOpacity);
-      
-      if (mapInstance.getLayer('grid-fill')) {
-          mapInstance.setLayoutProperty('grid-fill', 'visibility', 'visible');
-          mapInstance.setLayoutProperty('grid-count', 'visibility', 'visible');
-      }
-    }
-  }, [layerMode, features, isLoaded, previewedIds, hiddenIds]); 
+  // 8. HOVER HIGHLIGHT
+  useEffect(() => {
+    if (!map.current || !isLoaded) return;
+    const selectedId = selectedFeature?.properties?.id;
+
+    // Only show hover highlight when something is selected and hovering different image
+    const showHover = selectedId && hoveredFeatureId && hoveredFeatureId !== selectedId;
+    map.current.setFilter('oam-hover-highlight', showHover ? ['==', 'id', hoveredFeatureId] : ['==', 'id', '']);
+  }, [hoveredFeatureId, selectedFeature, isLoaded]); 
 
   return (
     <div className="relative w-full h-full">
       <div ref={mapContainer} className="w-full h-full" />
-      
-      {/* Layer Mode Toggle */}
-      <div className="absolute bottom-8 left-4 z-10 bg-white rounded-md shadow-md border border-gray-200 flex flex-col overflow-hidden">
-        <button onClick={() => setLayerMode('none')} className={`px-4 py-2 text-xs font-semibold text-left hover:bg-gray-50 border-b border-gray-100 ${layerMode === 'none' ? 'bg-gray-100 text-cyan-700' : 'text-gray-600'}`}>Footprints Only</button>
-        <button onClick={() => setLayerMode('previews')} className={`px-4 py-2 text-xs font-semibold text-left hover:bg-gray-50 ${layerMode === 'previews' ? 'bg-cyan-50 text-cyan-700' : 'text-gray-600'}`}>Live Previews</button>
-      </div>
 
-      {layerMode === 'previews' && zoomMsg && (
-        <div className="absolute bottom-8 left-36 z-30 bg-black/80 text-white text-xs px-4 py-2 rounded-full shadow-lg animate-fade-in pointer-events-none whitespace-nowrap">
-          {zoomMsg}
-        </div>
-      )}
+      {/* Preview Toggle - Bottom Left */}
+      <div className="absolute bottom-8 left-4 z-10">
+        <button
+          onClick={() => setPreviewsEnabled(!previewsEnabled)}
+          className={`px-4 py-2 text-xs font-semibold rounded-md shadow-md border transition-all ${
+            previewsEnabled
+              ? 'bg-cyan-50 text-cyan-700 border-cyan-200'
+              : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+          }`}
+        >
+          {previewsEnabled ? 'Previews On' : 'Previews Off'}
+        </button>
+      </div>
     </div>
   );
 }

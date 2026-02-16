@@ -3,14 +3,21 @@ import ImageCard from './ImageCard';
 
 const ITEMS_PER_PAGE = 10;
 
-function Sidebar({ features, onSelect, selectedFeature, isLoading, limit }) {
+function Sidebar({ features, onSelect, selectedFeature }) {
   const [visibleCount, setVisibleCount] = useState(ITEMS_PER_PAGE);
   const listRef = useRef(null);
+  const prevFeatureIdsRef = useRef('');
 
+  // Only reset scroll/count when the actual set of feature IDs changes
+  // Skip scroll reset when a feature is selected (fitBounds triggers idle → new features)
   useEffect(() => {
-    setVisibleCount(ITEMS_PER_PAGE);
-    if (listRef.current) listRef.current.scrollTop = 0;
-  }, [features]);
+    const ids = features.map(f => f.properties.id).join(',');
+    if (ids !== prevFeatureIdsRef.current) {
+      prevFeatureIdsRef.current = ids;
+      setVisibleCount(ITEMS_PER_PAGE);
+      if (!selectedFeature && listRef.current) listRef.current.scrollTop = 0;
+    }
+  }, [features, selectedFeature]);
 
   useEffect(() => {
     if (selectedFeature) {
@@ -26,9 +33,7 @@ function Sidebar({ features, onSelect, selectedFeature, isLoading, limit }) {
   };
 
   const getHeaderText = () => {
-    if (isLoading) return 'Loading...';
-    if (features.length === 0) return 'No images found in view';
-    if (features.length >= limit) return `Showing most recent ${limit} images`;
+    if (features.length === 0) return 'Zoom in to see images';
     return `${features.length} image${features.length !== 1 ? 's' : ''} in view`;
   };
 
@@ -48,17 +53,13 @@ function Sidebar({ features, onSelect, selectedFeature, isLoading, limit }) {
         </div>
 
         <p className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-2">
-           <span className={`w-2 h-2 rounded-full ${isLoading ? 'bg-gray-300 animate-pulse' : 'bg-cyan-500'}`}></span>
+           <span className="w-2 h-2 rounded-full bg-cyan-500"></span>
            {getHeaderText()}
         </p>
       </div>
 
       <div className="p-4 space-y-4">
-        {isLoading && features.length === 0 ? (
-          <div className="flex justify-center py-8">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-cyan-700"></div>
-          </div>
-        ) : features.length > 0 ? (
+        {features.length > 0 ? (
           <>
             {visibleFeatures.map((feature) => (
               <ImageCard
@@ -78,18 +79,11 @@ function Sidebar({ features, onSelect, selectedFeature, isLoading, limit }) {
               </button>
             )}
           </>
-        ) : !isLoading && (
-          <p className="text-center text-gray-500 py-8">Try moving the map or changing filters.</p>
+        ) : (
+          <p className="text-center text-gray-500 py-8">Zoom in to see imagery footprints.</p>
         )}
       </div>
 
-       {isLoading && features.length > 0 && (
-          <div className="absolute inset-0 bg-white/50 z-30 pointer-events-none flex items-start justify-center pt-20">
-              <div className="bg-white p-2 rounded-full shadow-md">
-                 <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-cyan-700"></div>
-              </div>
-          </div>
-       )}
     </div>
   );
 }

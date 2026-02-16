@@ -39,17 +39,16 @@ function ImageCard({ feature, onSelect, isSelected }) {
     return toSentenceCase(plat);
   };
 
-  const getIdsFromFeature = () => {
-    const uuid = p.uuid;
-    const parts = uuid.split('/');
-    const filename = parts[parts.length - 1].replace('.tif', '').replace('.tiff', '');
-    const uploadId = parts[parts.length - 3];
-    return { uploadId, filename };
-  };
-
   const getTmsUrl = () => {
-    const { uploadId, filename } = getIdsFromFeature();
-    return `https://tiles.openaerialmap.org/${uploadId}/0/${filename}/{z}/{x}/{y}`;
+    if (p.tms) return p.tms + '/{z}/{x}/{y}';
+    // Fallback: construct from uuid if tms not available
+    if (p.uuid) {
+      const parts = p.uuid.split('/');
+      const filename = parts[parts.length - 1].replace('.tif', '').replace('.tiff', '');
+      const uploadId = parts[parts.length - 3];
+      return `https://tiles.openaerialmap.org/${uploadId}/0/${filename}/{z}/{x}/{y}`;
+    }
+    return '';
   };
 
   const toggleDetails = (e) => { e.stopPropagation(); setIsExpanded(!isExpanded); };

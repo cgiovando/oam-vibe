@@ -18,6 +18,7 @@
     "@turf/center": "^7.3.2",
     "@turf/helpers": "^7.3.2",
     "maplibre-gl": "^5.14.0",
+    "pmtiles": "^4.4.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },

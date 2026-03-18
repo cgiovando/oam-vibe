@@ -82,6 +82,6 @@ npm run lint     # ESLint
 
 ## Known Issues & Tech Debt
 - **License field empty in current PMTiles:** ETL updated but needs re-run to populate `uuid`/`license`
-- **CORS proxy still needed for thumbnails:** Preview overlay images use corsproxy.io
+- **Preview images via TiTiler:** Map previews use `titiler.hotosm.org/cog/preview.png` (nodata=0 for transparency); some images with non-zero nodata may still show black edges
 - **Silent error handling:** Fetch failures only logged to console
 - **Map.jsx still large:** Could extract preview management and event handlers into hooks

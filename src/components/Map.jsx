@@ -11,12 +11,9 @@ const MB_TOKEN = 'pk.eyJ1Ijoib3BlbmFlcmlhbG1hcCIsImEiOiJjbWowaThzc2swOTVtM2NxMXA
 const PMTILES_URL = 'pmtiles://https://cgiovando-oam-api.s3.us-east-1.amazonaws.com/images.pmtiles';
 const META_BASE = 'https://cgiovando-oam-api.s3.us-east-1.amazonaws.com/meta';
 
-// Thumbnail proxy: local CORS proxy in dev, corsproxy.io in production
-const thumbProxyUrl = (url) => {
-  if (!url) return null;
-  if (import.meta.env.DEV) return `/cors-proxy/?${encodeURIComponent(url)}`;
-  return `https://corsproxy.io/?${encodeURIComponent(url)}`;
-};
+// Thumbnail URL: S3 bucket has CORS configured, load directly.
+// Query param avoids browser cache conflict with sidebar <img> (non-CORS) responses.
+const thumbUrl = (url) => url ? `${url}?x-map=1` : null;
 
 // Area threshold: features with bbox area above this are "large" (visible footprints at z8)
 const LARGE_IMAGE_THRESHOLD_SQ_KM = 50;
@@ -59,6 +56,8 @@ function OamMap({ selectedFeature, onMapInit, searchBbox, onSearchArea, onSelect
   const [isLoaded, setIsLoaded] = useState(false);
   const [idleTick, setIdleTick] = useState(0);
   const [mapZoom, setMapZoom] = useState(2);
+  const cogBoundsRef = useRef(new Map()); // COG URL → bounds array or 'fetching'
+  const [cogBoundsTick, setCogBoundsTick] = useState(0);
 
   useEffect(() => { onSelectRef.current = onSelect; }, [onSelect]);
   useEffect(() => { selectedFeatureRef.current = selectedFeature; }, [selectedFeature]);
@@ -188,9 +187,33 @@ function OamMap({ selectedFeature, onMapInit, searchBbox, onSearchArea, onSelect
     const oamMatch = tmsUrl.match(/^https:\/\/tiles\.openaerialmap\.org\/(.+)\/{z}\/{x}\/{y}$/);
     if (oamMatch) {
       const s3Path = `https://oin-hotosm-temp.s3.us-east-1.amazonaws.com/${oamMatch[1]}.tif`;
-      return `https://titiler.hotosm.org/cog/tiles/WebMercatorQuad/{z}/{x}/{y}@1x?url=${encodeURIComponent(s3Path)}`;
+      return `https://titiler.hotosm.org/cog/tiles/WebMercatorQuad/{z}/{x}/{y}@1x?url=${encodeURIComponent(s3Path)}&nodata=0`;
     }
     return tmsUrl;
+  };
+
+  // --- HELPER: Extract COG URL from rewritten TiTiler TMS URL ---
+  const extractCogUrl = (tmsUrl) => {
+    const match = tmsUrl.match(/[?&]url=([^&]+)/);
+    return match ? decodeURIComponent(match[1]) : null;
+  };
+
+  // --- HELPER: Fetch and cache COG bounds from TiTiler ---
+  // Uses /cog/bounds (returns WGS84) not /cog/info (returns native CRS which may be UTM).
+  const fetchCogBounds = (cogUrl) => {
+    if (cogBoundsRef.current.has(cogUrl)) return;
+    cogBoundsRef.current.set(cogUrl, 'fetching');
+    fetch(`https://titiler.hotosm.org/cog/bounds?url=${encodeURIComponent(cogUrl)}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data?.bounds) {
+          cogBoundsRef.current.set(cogUrl, data.bounds);
+          setCogBoundsTick(t => t + 1);
+        } else {
+          cogBoundsRef.current.delete(cogUrl);
+        }
+      })
+      .catch(() => cogBoundsRef.current.delete(cogUrl));
   };
 
   // --- HELPER: Query visible features from PMTiles and send to App ---
@@ -728,19 +751,28 @@ function OamMap({ selectedFeature, onMapInit, searchBbox, onSearchArea, onSelect
       } catch (e) {}
     }
 
-    // Update preview opacities and move selected preview to top
+    // Update preview and TMS opacities; move selected layers to top
     const style = mapInstance.getStyle();
-    const selectedLayerId = selectedId ? `preview-${selectedId}` : null;
+    const selectedPreviewLayer = selectedId ? `preview-${selectedId}` : null;
+    const selectedTmsLayer = selectedId ? `${TMS_PREFIX}${selectedId}-layer` : null;
     style?.layers?.forEach(layer => {
       if (layer.id.startsWith('preview-')) {
         const previewId = layer.id.replace('preview-', '');
         const opacity = selectedId ? (previewId === selectedId ? 1.0 : 0.3) : 0.95;
         mapInstance.setPaintProperty(layer.id, 'raster-opacity', opacity);
       }
+      if (layer.id.startsWith(TMS_PREFIX) && layer.id.endsWith('-layer')) {
+        const tmsId = layer.id.replace(TMS_PREFIX, '').replace('-layer', '');
+        const opacity = selectedId ? (tmsId === selectedId ? 1.0 : 0.6) : 0.95;
+        mapInstance.setPaintProperty(layer.id, 'raster-opacity', opacity);
+      }
     });
-    // Move selected preview to top of preview stack (just below footprint-hover)
-    if (selectedLayerId && mapInstance.getLayer(selectedLayerId)) {
-      mapInstance.moveLayer(selectedLayerId, 'footprint-hover');
+    // Move selected preview/TMS to top (just below footprint-hover)
+    if (selectedPreviewLayer && mapInstance.getLayer(selectedPreviewLayer)) {
+      mapInstance.moveLayer(selectedPreviewLayer, 'footprint-hover');
+    }
+    if (selectedTmsLayer && mapInstance.getLayer(selectedTmsLayer)) {
+      mapInstance.moveLayer(selectedTmsLayer, 'footprint-hover');
     }
 
     // Update footprint visibility
@@ -759,6 +791,8 @@ function OamMap({ selectedFeature, onMapInit, searchBbox, onSearchArea, onSelect
     const selectedId = selectedFeature?.properties?.id;
 
     // Show previews at z8+ — determine which features are visible, then use getFullBbox for positioning
+    // Skip images that have TMS layers (they render full-res tiles instead of stretched thumbnails)
+    const tmsImageIds = mapInstance._tmsImageIds || new Set();
     const visibleIds = new Set();
     const featureThumbnails = new Map(); // id → thumbnail url
     if (previewsEnabled && zoom >= 8) {
@@ -767,6 +801,7 @@ function OamMap({ selectedFeature, onMapInit, searchBbox, onSearchArea, onSelect
         for (const f of raw) {
           const id = f.properties._id;
           if (!id || !f.properties.thumbnail) continue;
+          if (tmsImageIds.has(id)) continue; // TMS handles this image
           if (!visibleIds.has(id)) {
             if (visibleIds.size >= MAX_PREVIEWS) continue;
             visibleIds.add(id);
@@ -776,13 +811,13 @@ function OamMap({ selectedFeature, onMapInit, searchBbox, onSearchArea, onSelect
       } catch (e) {}
     }
 
-    // Remove stale preview layers
+    // Remove stale preview layers (also remove if TMS now handles this image)
     const style = mapInstance.getStyle();
     if (style && style.layers) {
       style.layers.forEach(layer => {
         if (layer.id.startsWith('preview-')) {
           const id = layer.id.replace('preview-', '');
-          if (!visibleIds.has(id)) {
+          if (!visibleIds.has(id) || mapInstance.getSource(`${TMS_PREFIX}${id}`)) {
             mapInstance.removeLayer(layer.id);
             if (mapInstance.getSource(layer.id)) mapInstance.removeSource(layer.id);
           }
@@ -808,7 +843,7 @@ function OamMap({ selectedFeature, onMapInit, searchBbox, onSearchArea, onSelect
           continue;
         }
 
-        const proxyUrl = thumbProxyUrl(featureThumbnails.get(id));
+        const proxyUrl = thumbUrl(featureThumbnails.get(id));
         const opacity = selectedId ? (id === selectedId ? 1.0 : 0.3) : 0.95;
 
         mapInstance.addSource(layerId, { type: 'image', url: proxyUrl, coordinates: coords });
@@ -822,15 +857,15 @@ function OamMap({ selectedFeature, onMapInit, searchBbox, onSearchArea, onSelect
     }
   }, [isLoaded, selectedFeature, previewsEnabled, idleTick]);
 
-  // 7. TMS FULL-RESOLUTION LAYER (at z14+)
-  const TMS_SOURCE_ID = 'tms-fullres';
-  const TMS_LAYER_ID = 'tms-fullres-layer';
-  const TMS_MIN_ZOOM = 14;
-
-  const removeTmsLayer = (mapInstance) => {
-    if (mapInstance.getLayer(TMS_LAYER_ID)) mapInstance.removeLayer(TMS_LAYER_ID);
-    if (mapInstance.getSource(TMS_SOURCE_ID)) mapInstance.removeSource(TMS_SOURCE_ID);
-  };
+  // 7. TMS FULL-RESOLUTION LAYERS
+  // All TMS layers use tms-{id} naming (no separate "selected" source).
+  // - z12+: large images (>50 sq km) AND selected image get TMS tiles automatically
+  // - z16+: all visible images get TMS tiles (up to MAX_TMS cap)
+  // Layers are ordered by area: largest on bottom, smallest on top, selected always on top.
+  const TMS_PREFIX = 'tms-';
+  const TMS_LARGE_MIN_ZOOM = 12;
+  const TMS_ALL_MIN_ZOOM = 16;
+  const MAX_TMS = 8;
 
   useEffect(() => {
     if (!map.current || !isLoaded) return;
@@ -838,46 +873,133 @@ function OamMap({ selectedFeature, onMapInit, searchBbox, onSearchArea, onSelect
     const zoom = mapInstance.getZoom();
     const selectedId = selectedFeature?.properties?.id;
 
-    // Remove TMS if no selection or below min zoom
-    if (!selectedFeature || zoom < TMS_MIN_ZOOM) {
-      removeTmsLayer(mapInstance);
-      return;
+    // Build desired TMS entries: id → { url, bounds, area }
+    const desiredTms = new Map();
+    const tmsImageIds = new Set();
+
+    // Selected image at z10+ (any size — user explicitly picked it, lower threshold
+    // because fitBounds may zoom out slightly below z12 to fit the full image).
+    // Use actual COG bounds from TiTiler so MapLibre only requests tiles where the
+    // image has data — prevents 404 floods when panning outside the COG extent.
+    if (selectedFeature && zoom >= 10) {
+      const tmsUrl = getTmsUrl(selectedFeature.properties);
+      if (tmsUrl) {
+        const cogUrl = extractCogUrl(tmsUrl);
+        let cogBounds = cogUrl ? cogBoundsRef.current.get(cogUrl) : null;
+        if (cogBounds === 'fetching') cogBounds = null;
+        if (cogUrl && !cogBoundsRef.current.has(cogUrl)) fetchCogBounds(cogUrl);
+
+        const area = cogBounds ? bboxAreaKm2(cogBounds) : 0;
+        desiredTms.set(`${TMS_PREFIX}${selectedId}`, {
+          url: tmsUrl, bounds: cogBounds, area
+        });
+        tmsImageIds.add(selectedId);
+      }
     }
 
-    const tmsUrl = getTmsUrl(selectedFeature.properties);
-    if (!tmsUrl) {
-      removeTmsLayer(mapInstance);
-      return;
+    // Large images at z12+ and all images at z16+
+    if (zoom >= TMS_LARGE_MIN_ZOOM) {
+      try {
+        const raw = mapInstance.querySourceFeatures('oam-tiles', { sourceLayer: 'images' });
+        const seen = new Set();
+        for (const f of raw) {
+          if (desiredTms.size >= MAX_TMS) break;
+          const id = f.properties._id;
+          if (!id || seen.has(id)) continue;
+          seen.add(id);
+          if (desiredTms.has(`${TMS_PREFIX}${id}`)) continue; // already added (e.g. selected)
+
+          const full = getFullBbox(id);
+          if (!full) continue;
+          const area = bboxAreaKm2(full.bbox);
+
+          // At z12-16: only large images; at z16+: all images
+          if (zoom < TMS_ALL_MIN_ZOOM && area <= LARGE_IMAGE_THRESHOLD_SQ_KM) continue;
+
+          const tmsUrl = getTmsUrl(f.properties);
+          if (tmsUrl) {
+            desiredTms.set(`${TMS_PREFIX}${id}`, { url: tmsUrl, bounds: full.bbox, area });
+            tmsImageIds.add(id);
+          }
+        }
+      } catch (e) {}
     }
 
-    // If TMS source already exists for current selection, skip
-    const existingSource = mapInstance.getSource(TMS_SOURCE_ID);
-    if (existingSource) {
-      // Check if it's the same image — tiles array matches
-      const currentTiles = existingSource.tiles;
-      if (currentTiles && currentTiles[0] === tmsUrl) return;
-      // Different image — remove and re-add
-      removeTmsLayer(mapInstance);
+    // Store TMS image IDs so preview section can skip them
+    mapInstance._tmsImageIds = tmsImageIds;
+
+    // Remove stale TMS layers
+    const style = mapInstance.getStyle();
+    if (style?.layers) {
+      for (const layer of style.layers) {
+        if (layer.id.startsWith(TMS_PREFIX) && layer.id.endsWith('-layer') && !desiredTms.has(layer.id.replace('-layer', ''))) {
+          const sourceId = layer.id.replace('-layer', '');
+          mapInstance.removeLayer(layer.id);
+          if (mapInstance.getSource(sourceId)) mapInstance.removeSource(sourceId);
+        }
+      }
     }
 
-    try {
-      mapInstance.addSource(TMS_SOURCE_ID, {
-        type: 'raster',
-        tiles: [tmsUrl],
-        tileSize: 256,
-        minzoom: 12,
-        maxzoom: 22
-      });
-      mapInstance.addLayer({
-        id: TMS_LAYER_ID,
-        type: 'raster',
-        source: TMS_SOURCE_ID,
-        paint: { 'raster-opacity': 1.0 }
-      }, 'footprint-hover');
-    } catch (e) {
-      console.error('TMS layer error:', e);
+    // Sort by area descending (largest first = added first = bottom of stack)
+    // Selected image goes last (top of stack)
+    const sorted = [...desiredTms.entries()].sort((a, b) => {
+      const aIsSelected = a[0] === `${TMS_PREFIX}${selectedId}`;
+      const bIsSelected = b[0] === `${TMS_PREFIX}${selectedId}`;
+      if (aIsSelected) return 1;  // selected goes last (top)
+      if (bIsSelected) return -1;
+      return (b[1].area || 0) - (a[1].area || 0); // larger area first (bottom)
+    });
+
+    // Add or keep desired TMS layers in sorted order
+    for (const [sourceId, { url, bounds }] of sorted) {
+      const layerId = `${sourceId}-layer`;
+      const isSelected = sourceId === `${TMS_PREFIX}${selectedId}`;
+
+      if (mapInstance.getSource(sourceId)) {
+        const existing = mapInstance.getSource(sourceId);
+        const urlMatch = existing.tiles && existing.tiles[0] === url;
+        // Check if bounds changed — recreate source if desired bounds differ.
+        // If we now have bounds (e.g. COG bounds arrived) but source has none, recreate.
+        const boundsMatch = !bounds ||
+          (!!existing.bounds &&
+           existing.bounds[0] <= bounds[0] && existing.bounds[1] <= bounds[1] &&
+           existing.bounds[2] >= bounds[2] && existing.bounds[3] >= bounds[3]);
+        if (urlMatch && boundsMatch) {
+          // Same URL, bounds still cover desired area — just update opacity/order
+          const opacity = isSelected ? 1.0 : (selectedId ? 0.6 : 0.95);
+          if (mapInstance.getLayer(layerId)) {
+            mapInstance.setPaintProperty(layerId, 'raster-opacity', opacity);
+            mapInstance.moveLayer(layerId, 'footprint-hover');
+          }
+          continue;
+        }
+        // URL changed or bounds grew — remove and re-add
+        if (mapInstance.getLayer(layerId)) mapInstance.removeLayer(layerId);
+        mapInstance.removeSource(sourceId);
+      }
+
+      try {
+        const opacity = isSelected ? 1.0 : (selectedId ? 0.6 : 0.95);
+        const sourceOpts = {
+          type: 'raster',
+          tiles: [url],
+          tileSize: 256,
+          minzoom: isSelected ? 10 : 12,
+          maxzoom: 22
+        };
+        if (bounds) sourceOpts.bounds = bounds;
+        mapInstance.addSource(sourceId, sourceOpts);
+        mapInstance.addLayer({
+          id: layerId,
+          type: 'raster',
+          source: sourceId,
+          paint: { 'raster-opacity': opacity }
+        }, 'footprint-hover');
+      } catch (e) {
+        console.error('TMS layer error:', e);
+      }
     }
-  }, [selectedFeature, isLoaded, idleTick]);
+  }, [selectedFeature, isLoaded, idleTick, cogBoundsTick]);
 
   // 8. HOVER HIGHLIGHT
   useEffect(() => {

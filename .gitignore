@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+.timesheet-log.md
+CLAUDE.md
+PROJECT_NOTES.md
+AGENTS.md

@@ -901,6 +901,7 @@ function OamMap({ selectedFeature, onMapInit, searchBbox, onSearchArea, onSelect
     if (zoom >= TMS_LARGE_MIN_ZOOM) {
       try {
         const raw = mapInstance.querySourceFeatures('oam-tiles', { sourceLayer: 'images' });
+        const currentFilters = filtersRef.current;
         const seen = new Set();
         for (const f of raw) {
           if (desiredTms.size >= MAX_TMS) break;
@@ -908,6 +909,7 @@ function OamMap({ selectedFeature, onMapInit, searchBbox, onSearchArea, onSelect
           if (!id || seen.has(id)) continue;
           seen.add(id);
           if (desiredTms.has(`${TMS_PREFIX}${id}`)) continue; // already added (e.g. selected)
+          if (!matchesFilters(f.properties, currentFilters)) continue;
 
           const full = getFullBbox(id);
           if (!full) continue;
@@ -999,7 +1001,7 @@ function OamMap({ selectedFeature, onMapInit, searchBbox, onSearchArea, onSelect
         console.error('TMS layer error:', e);
       }
     }
-  }, [selectedFeature, isLoaded, idleTick, cogBoundsTick]);
+  }, [selectedFeature, isLoaded, idleTick, cogBoundsTick, filters]);
 
   // 8. HOVER HIGHLIGHT
   useEffect(() => {
